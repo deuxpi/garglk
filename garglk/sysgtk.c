@@ -37,8 +37,6 @@
 
 static GtkWidget *frame;
 static GtkWidget *canvas;
-static GdkCursor *gdk_hand;
-static GdkCursor *gdk_ibeam;
 static GtkIMContext *imcontext;
 
 #define MaxBuffer 1024
@@ -109,7 +107,7 @@ void winexit(void)
 void winchoosefile(char *prompt, char *buf, int len, int filter, GtkFileChooserAction action, const char *button)
 {
     GtkWidget *filedlog = gtk_file_chooser_dialog_new(prompt, NULL, action,
-                                                      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+                                                      "_Cancel", GTK_RESPONSE_CANCEL,
                                                       button, GTK_RESPONSE_ACCEPT,
                                                       NULL);
     char *curdir;
@@ -169,14 +167,14 @@ void winopenfile(char *prompt, char *buf, int len, int filter)
 {
     char realprompt[256];
     sprintf(realprompt, "Open: %s", prompt);
-    winchoosefile(realprompt, buf, len, filter, GTK_FILE_CHOOSER_ACTION_OPEN, GTK_STOCK_OPEN);
+    winchoosefile(realprompt, buf, len, filter, GTK_FILE_CHOOSER_ACTION_OPEN, "_Open");
 }
 
 void winsavefile(char *prompt, char *buf, int len, int filter)
 {
     char realprompt[256];
     sprintf(realprompt, "Save: %s", prompt);
-    winchoosefile(realprompt, buf, len, filter, GTK_FILE_CHOOSER_ACTION_SAVE, GTK_STOCK_SAVE);
+    winchoosefile(realprompt, buf, len, filter, GTK_FILE_CHOOSER_ACTION_SAVE, "_Save");
 }
 
 void winclipstore(glui32 *text, int len)
@@ -324,37 +322,31 @@ static void onresize(GtkWidget *widget, GtkAllocation *event, void *data)
     gli_windows_size_change();
 }
 
-static void onexpose(GtkWidget *widget, GdkEventExpose *event, void *data)
+static gboolean onexpose(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
-    int x0 = event->area.x;
-    int y0 = event->area.y;
-    int w = event->area.width;
-    int h = event->area.height;
-
-    cairo_t *cr;
+    guint width, height;
     GdkPixbuf *pixbuf;
 
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x0 + w > gli_image_w) w = gli_image_w - x0;
-    if (y0 + h > gli_image_h) h = gli_image_h - y0;
-    if (w < 0) return;
-    if (h < 0) return;
+    width = gtk_widget_get_allocated_width(widget);
+    height = gtk_widget_get_allocated_height(widget);
+
+    if (width > gli_image_w) width = gli_image_w;
+    if (height > gli_image_h) height = gli_image_h;
 
     if (!gli_drawselect)
         gli_windows_redraw();
     else
         gli_drawselect = FALSE;
 
-    cr = gdk_cairo_create(gtk_widget_get_window(canvas));
     pixbuf = gdk_pixbuf_new_from_data(
-        gli_image_rgb + y0 * gli_image_s + x0 * 3,
+        gli_image_rgb,
         GDK_COLORSPACE_RGB,
-        FALSE, 8, w, h, w * 3, NULL, NULL);
-    gdk_cairo_set_source_pixbuf(cr, pixbuf, x0, y0);
+        FALSE, 8, width, height, width * 3, NULL, NULL);
+    gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
     cairo_paint(cr);
     g_object_unref(pixbuf);
-    cairo_destroy(cr);
+
+    return FALSE;
 }
 
 static void onbuttondown(GtkWidget *widget, GdkEventButton *event, void *data)
@@ -386,10 +378,15 @@ static void onscroll(GtkWidget *widget, GdkEventScroll *event, void *data)
 static void onmotion(GtkWidget *widget, GdkEventMotion *event, void *data)
 {
     int x,y;
+    GdkWindow *window;
+    GdkDisplay *display;
+
+    window = gtk_widget_get_window(widget);
+    display = gdk_window_get_display(window);
 
     if (event->is_hint)
     {
-        gtk_widget_get_pointer(widget, &x, &y);
+        gdk_window_get_device_position(window, gtk_get_current_event_device(), &x, &y, NULL);
     }
     else
     {
@@ -400,15 +397,22 @@ static void onmotion(GtkWidget *widget, GdkEventMotion *event, void *data)
     /* hyperlinks and selection */
     if (gli_copyselect)
     {
-        gdk_window_set_cursor(gtk_widget_get_window(widget), gdk_ibeam);
+        GdkCursor *gdk_ibeam = gdk_cursor_new_for_display(display, GDK_XTERM);
+        gdk_window_set_cursor(window, gdk_ibeam);
+        g_object_unref(gdk_ibeam);
         gli_move_selection(x, y);
     }
     else
     {
-        if (gli_get_hyperlink(x, y))
-            gdk_window_set_cursor(gtk_widget_get_window(widget), gdk_hand);
+        if (gli_get_hyperlink(x, y)) {
+            GdkCursor *gdk_hand = gdk_cursor_new_for_display(display, GDK_HAND2);
+            gdk_window_set_cursor(window, gdk_hand);
+            g_object_unref(gdk_hand);
+        }
         else
-            gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
+        {
+            gdk_window_set_cursor(window, NULL);
+        }
     }
 }
 
@@ -517,10 +521,6 @@ static void onquit(GtkWidget *widget, void *data)
 void wininit(int *argc, char **argv)
 {
     gtk_init(argc, &argv);
-    gtk_widget_set_default_colormap(gdk_rgb_get_cmap());
-    gtk_widget_set_default_visual(gdk_rgb_get_visual());
-    gdk_hand = gdk_cursor_new(GDK_HAND2);
-    gdk_ibeam = gdk_cursor_new(GDK_XTERM);
 }
 
 void winopen(void)
@@ -540,32 +540,32 @@ void winopen(void)
     defh = gli_wmarginy * 2 + gli_cellh * gli_rows;
 
     frame = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    GTK_WIDGET_SET_FLAGS(frame, GTK_CAN_FOCUS);
+    gtk_widget_set_can_focus(frame, TRUE);
     gtk_widget_set_events(frame, GDK_BUTTON_PRESS_MASK
                                | GDK_BUTTON_RELEASE_MASK
                                | GDK_POINTER_MOTION_MASK
                                | GDK_POINTER_MOTION_HINT_MASK
                                | GDK_SCROLL_MASK);
-    gtk_signal_connect(GTK_OBJECT(frame), "button_press_event", 
-                       GTK_SIGNAL_FUNC(onbuttondown), NULL);
-    gtk_signal_connect(GTK_OBJECT(frame), "button_release_event", 
-                       GTK_SIGNAL_FUNC(onbuttonup), NULL);
-    gtk_signal_connect(GTK_OBJECT(frame), "scroll_event", 
-                       GTK_SIGNAL_FUNC(onscroll), NULL);
-    gtk_signal_connect(GTK_OBJECT(frame), "key_press_event", 
-                       GTK_SIGNAL_FUNC(onkeydown), NULL);
-    gtk_signal_connect(GTK_OBJECT(frame), "key_release_event", 
-                       GTK_SIGNAL_FUNC(onkeyup), NULL);
-    gtk_signal_connect(GTK_OBJECT(frame), "destroy", 
-                       GTK_SIGNAL_FUNC(onquit), "WM destroy");
-    gtk_signal_connect(GTK_OBJECT(frame), "motion_notify_event",
-        GTK_SIGNAL_FUNC(onmotion), NULL);
+    g_signal_connect(frame, "button_press_event",
+                     G_CALLBACK(onbuttondown), NULL);
+    g_signal_connect(frame, "button_release_event",
+                     G_CALLBACK(onbuttonup), NULL);
+    g_signal_connect(frame, "scroll_event",
+                     G_CALLBACK(onscroll), NULL);
+    g_signal_connect(frame, "key_press_event",
+                     G_CALLBACK(onkeydown), NULL);
+    g_signal_connect(frame, "key_release_event",
+                     G_CALLBACK(onkeyup), NULL);
+    g_signal_connect(frame, "destroy",
+                     G_CALLBACK(onquit), "WM destroy");
+    g_signal_connect(frame, "motion_notify_event",
+                     G_CALLBACK(onmotion), NULL);
 
     canvas = gtk_drawing_area_new();
-    gtk_signal_connect(GTK_OBJECT(canvas), "size_allocate", 
-                       GTK_SIGNAL_FUNC(onresize), NULL);
-    gtk_signal_connect(GTK_OBJECT(canvas), "expose_event", 
-                       GTK_SIGNAL_FUNC(onexpose), NULL);
+    g_signal_connect(canvas, "size_allocate",
+                     G_CALLBACK(onresize), NULL);
+    g_signal_connect(G_OBJECT(canvas), "draw",
+                     G_CALLBACK(onexpose), NULL);
     gtk_container_add(GTK_CONTAINER(frame), canvas);
 
     imcontext = gtk_im_multicontext_new();

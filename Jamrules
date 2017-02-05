@@ -85,7 +85,7 @@ switch $(OS)
         if $(GUILIB) = EFL {
             PKGCONFIG = "pkg-config freetype2 evas ecore ecore-evas elementary fontconfig" ;
         } else {
-            PKGCONFIG = "pkg-config freetype2 gtk+-x11-2.0 gdk-x11-2.0 gobject-2.0 glib-2.0 fontconfig" ;
+            PKGCONFIG = "pkg-config freetype2 gtk+-x11-3.0 gdk-x11-3.0 gobject-2.0 glib-2.0 fontconfig" ;
         }
         GARGLKCCFLAGS = "`$(PKGCONFIG) --cflags`" -fPIC -DGTK_DISABLE_SINGLE_INCLUDES ;
         GARGLKLIBS = "`$(PKGCONFIG) --libs`" -ljpeg -lpng -lz -lrt ;
