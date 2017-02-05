@@ -32,7 +32,8 @@
 #include "garglk.h"
 
 #include <gtk/gtk.h>
-#include <gdk/gdkkeysyms.h>
+#include <gdk/gdk.h>
+#include <gdk/gdkkeysyms-compat.h>
 
 static GtkWidget *frame;
 static GtkWidget *canvas;
@@ -330,6 +331,9 @@ static void onexpose(GtkWidget *widget, GdkEventExpose *event, void *data)
     int w = event->area.width;
     int h = event->area.height;
 
+    cairo_t *cr;
+    GdkPixbuf *pixbuf;
+
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x0 + w > gli_image_w) w = gli_image_w - x0;
@@ -342,11 +346,15 @@ static void onexpose(GtkWidget *widget, GdkEventExpose *event, void *data)
     else
         gli_drawselect = FALSE;
 
-    gdk_draw_rgb_image(canvas->window, canvas->style->black_gc,
-        x0, y0, w, h,
-        GDK_RGB_DITHER_NONE,
+    cr = gdk_cairo_create(gtk_widget_get_window(canvas));
+    pixbuf = gdk_pixbuf_new_from_data(
         gli_image_rgb + y0 * gli_image_s + x0 * 3,
-        gli_image_s);
+        GDK_COLORSPACE_RGB,
+        FALSE, 8, w, h, w * 3, NULL, NULL);
+    gdk_cairo_set_source_pixbuf(cr, pixbuf, x0, y0);
+    cairo_paint(cr);
+    g_object_unref(pixbuf);
+    cairo_destroy(cr);
 }
 
 static void onbuttondown(GtkWidget *widget, GdkEventButton *event, void *data)
@@ -362,7 +370,7 @@ static void onbuttonup(GtkWidget *widget, GdkEventButton *event, void *data)
     if (event->button == 1)
     {
         gli_copyselect = FALSE;
-        gdk_window_set_cursor((GTK_WIDGET(widget)->window), NULL);
+        gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
         winclipsend(PRIMARY);
     }
 }
@@ -392,15 +400,15 @@ static void onmotion(GtkWidget *widget, GdkEventMotion *event, void *data)
     /* hyperlinks and selection */
     if (gli_copyselect)
     {
-        gdk_window_set_cursor((GTK_WIDGET(widget)->window), gdk_ibeam);
+        gdk_window_set_cursor(gtk_widget_get_window(widget), gdk_ibeam);
         gli_move_selection(x, y);
     }
     else
     {
         if (gli_get_hyperlink(x, y))
-            gdk_window_set_cursor((GTK_WIDGET(widget)->window), gdk_hand);
+            gdk_window_set_cursor(gtk_widget_get_window(widget), gdk_hand);
         else
-            gdk_window_set_cursor((GTK_WIDGET(widget)->window), NULL);
+            gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
     }
 }
 
